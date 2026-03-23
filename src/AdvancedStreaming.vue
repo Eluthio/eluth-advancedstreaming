@@ -346,6 +346,8 @@ const savingSettings = ref(false)
 const settingsSaved  = ref(false)
 
 function openSettings() {
+    // Refresh source list at open time so late-loading plugins (e.g. Plex) are included
+    allKnownSources.value = Object.entries(window.__EluthStreamSources ?? {}).map(([key, src]) => ({ key, ...src }))
     settingsForm.value = {
         enabledSources:     [...(props.settings.enabledSources ?? ['camera', 'screen'])],
         transitionType:     props.settings.transition?.type     ?? 'fade',
@@ -382,7 +384,7 @@ function toggleEnabledSource(key) {
     else settingsForm.value.enabledSources.splice(idx, 1)
 }
 
-const allKnownSources = computed(() => Object.entries(window.__EluthStreamSources ?? {}).map(([key, src]) => ({ key, ...src })))
+const allKnownSources = ref([])
 
 function updateDuration() {
     const elapsed = Math.floor((Date.now() - streamStartTs) / 1000)
