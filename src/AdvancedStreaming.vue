@@ -42,49 +42,51 @@
 
         <!-- Live compositor -->
         <div v-else class="as-live">
-            <!-- Preview canvas -->
-            <div class="as-preview-wrap" ref="previewWrap">
-                <canvas ref="canvasEl" class="as-canvas" :width="outputWidth" :height="outputHeight" />
 
-                <!-- Drag handles for selected layer -->
-                <template v-if="selectedLayerId && activeScene">
-                    <div
-                        v-for="layer in activeScene.layers.filter(l => l.id === selectedLayerId)"
-                        :key="layer.id"
-                        class="as-drag-handle"
-                        :style="layerHandleStyle(layer)"
-                        @mousedown.prevent="startDrag($event, layer, 'move')"
-                    >
+            <!-- Main column: canvas + bottom bar -->
+            <div class="as-live-main">
+                <div class="as-preview-wrap" ref="previewWrap">
+                    <canvas ref="canvasEl" class="as-canvas" :width="outputWidth" :height="outputHeight" />
+
+                    <!-- Drag handles for selected layer -->
+                    <template v-if="selectedLayerId && activeScene">
                         <div
-                            class="as-resize-corner as-resize-corner--br"
-                            @mousedown.stop.prevent="startDrag($event, layer, 'resize')"
-                        />
+                            v-for="layer in activeScene.layers.filter(l => l.id === selectedLayerId)"
+                            :key="layer.id"
+                            class="as-drag-handle"
+                            :style="layerHandleStyle(layer)"
+                            @mousedown.prevent="startDrag($event, layer, 'move')"
+                        >
+                            <div
+                                class="as-resize-corner as-resize-corner--br"
+                                @mousedown.stop.prevent="startDrag($event, layer, 'resize')"
+                            />
+                        </div>
+                    </template>
+
+                    <!-- LIVE badge -->
+                    <div class="as-live-badge">● LIVE</div>
+                    <div class="as-live-duration">{{ streamDuration }}</div>
+                </div>
+
+                <!-- Bottom bar -->
+                <div class="as-bottom-bar">
+                    <SceneManager
+                        :scenes="scenes"
+                        :active-id="activeSceneId"
+                        @switch="switchSceneLive"
+                        @add="addScene"
+                        @delete="deleteScene"
+                        @rename="renameScene"
+                    />
+                    <div class="as-bottom-controls">
+                        <button class="as-add-layer-btn" @click="showSourcePicker = true">＋ Source</button>
+                        <button class="as-stop-btn" @click="stopStream">⏹ Stop</button>
                     </div>
-                </template>
-
-                <!-- LIVE badge -->
-                <div class="as-live-badge">● LIVE</div>
-                <div class="as-live-duration">{{ streamDuration }}</div>
-            </div>
-
-            <!-- Bottom bar -->
-            <div class="as-bottom-bar">
-                <SceneManager
-                    :scenes="scenes"
-                    :active-id="activeSceneId"
-                    @switch="switchSceneLive"
-                    @add="addScene"
-                    @delete="deleteScene"
-                    @rename="renameScene"
-                />
-
-                <div class="as-bottom-controls">
-                    <button class="as-add-layer-btn" @click="showSourcePicker = true">＋ Source</button>
-                    <button class="as-stop-btn" @click="stopStream">⏹ Stop</button>
                 </div>
             </div>
 
-            <!-- Right panel: layer editor -->
+            <!-- Right sidebar: layer editor -->
             <LayerEditor
                 v-if="activeScene"
                 :layers="activeScene.layers"
@@ -723,7 +725,8 @@ onUnmounted(() => {
 .as-error { font-size: 12px; color: #f87171; text-align: center; }
 
 /* ── Live compositor ── */
-.as-live { display: flex; flex: 1; min-height: 0; position: relative; flex-direction: column; }
+.as-live { display: flex; flex: 1; min-height: 0; flex-direction: row; }
+.as-live-main { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .as-preview-wrap {
     flex: 1; min-height: 0; position: relative; background: #000;
     display: flex; align-items: center; justify-content: center; overflow: hidden;
