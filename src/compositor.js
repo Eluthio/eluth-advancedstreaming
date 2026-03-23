@@ -64,9 +64,9 @@ export class Compositor {
     }
 
     _draw() {
-        const { canvas, ctx, _off: off, _offctx: offctx } = this
+        const { _off: off, _offctx: offctx } = this
 
-        // Compose into offscreen buffer
+        // Compose full frame into offscreen buffer
         offctx.clearRect(0, 0, off.width, off.height)
         offctx.fillStyle = '#000'
         offctx.fillRect(0, 0, off.width, off.height)
@@ -77,10 +77,11 @@ export class Compositor {
             this._drawLayers(this.layers, 1, offctx)
         }
 
-        // Single atomic blit to the captured canvas — captureStream sees
-        // either the previous complete frame or this new one, never a partial.
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        ctx.drawImage(off, 0, 0)
+        // Blit complete frame onto the captured canvas in one operation.
+        // No clearRect here — the GPU compositor thread can sample the canvas
+        // between clearRect and drawImage, producing a transparent flash.
+        // The offscreen canvas is fully opaque so drawImage overwrites everything.
+        this.ctx.drawImage(off, 0, 0)
     }
 
     _drawLayers(layers, masterOpacity, ctx) {
@@ -88,10 +89,6 @@ export class Compositor {
         const visible = layers.filter(l => l.visible && l.el)
 
         for (const layer of visible) {
-            // Skip if the video element hasn't decoded a frame yet — avoids
-            // brief black flashes when a source stalls or restarts.
-            if (layer.el.readyState < 2) continue
-
             const x = layer.x * canvas.width
             const y = layer.y * canvas.height
             const w = layer.w * canvas.width
@@ -99,9 +96,29 @@ export class Compositor {
 
             ctx.save()
             ctx.globalAlpha = layer.opacity * masterOpacity
-            try {
-                ctx.drawImage(layer.el, x, y, w, h)
-            } catch { /* source frame unavailable */ }
+
+            if (layer.el.readyState >= 2) {
+                try {
+                    ctx.drawImage(layer.el, x, y, w, h)
+                    // Cache the frame so a brief stall shows the last good frame
+                    // rather than dropping to transparent.
+                    if (!layer._frameCache) {
+                        layer._frameCache = document.createElement('canvas')
+                        layer._frameCacheCtx = layer._frameCache.getContext('2d')
+                    }
+                    const vw = layer.el.videoWidth  || 640
+                    const vh = layer.el.videoHeight || 360
+                    if (layer._frameCache.width !== vw || layer._frameCache.height !== vh) {
+                        layer._frameCache.width  = vw
+                        layer._frameCache.height = vh
+                    }
+                    layer._frameCacheCtx.drawImage(layer.el, 0, 0, vw, vh)
+                } catch { /* frame unavailable */ }
+            } else if (layer._frameCache) {
+                // Source stalled — draw the last known-good frame
+                ctx.drawImage(layer._frameCache, x, y, w, h)
+            }
+
             ctx.restore()
         }
     }
