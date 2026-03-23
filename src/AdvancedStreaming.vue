@@ -60,6 +60,8 @@ const props = defineProps({
     canStream:     { type: Boolean, default: false },
 })
 
+const emit = defineEmits(['stream-started', 'stream-stopped'])
+
 // ── Settings (localStorage) ───────────────────────────────────────────────────
 const SETTINGS_KEY = 'advanced-streaming-settings'
 
@@ -256,6 +258,7 @@ async function goLive() {
         streamStartTs     = Date.now()
         isStreaming.value = true
         goingLive.value   = false
+        emit('stream-started')
         await nextTick()
         broadcastState()
 
@@ -300,6 +303,7 @@ async function stopStream() {
     compositor?.stop()
     compositor = null
     isStreaming.value = false
+    emit('stream-stopped')
     broadcastState()
 
     await fetch(`${props.apiBase}/streams/${props.channelId}/stop`, {
