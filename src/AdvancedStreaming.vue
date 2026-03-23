@@ -106,7 +106,7 @@
 
         <!-- Settings modal -->
         <div v-if="showSettings" class="as-source-overlay" @click.self="showSettings = false">
-                <div class="as-source-modal" style="max-width:420px;">
+                <div class="as-source-modal" style="max-width:420px;padding:24px;">
                     <div class="as-source-title">Advanced Streaming — Settings</div>
 
                     <div class="as-settings-section">
@@ -618,7 +618,7 @@ onUnmounted(() => {
 
 .as-settings-section { margin-bottom: 16px; }
 .as-settings-label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
-.as-settings-sources { display: flex; flex-direction: column; gap: 6px; }
+.as-settings-sources { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
 .as-settings-source-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #cbd5e1; cursor: pointer; }
 .as-settings-source-row input { accent-color: var(--accent, #5865f2); }
 .as-settings-row { display: flex; align-items: center; gap: 8px; }
