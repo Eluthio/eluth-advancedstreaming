@@ -11,6 +11,13 @@ export class Compositor {
         this.running = false
         this.rafId   = null
         this._transition = null // { fromLayers, toLayers, type, duration, startedAt }
+
+        // Offscreen buffer: we compose here then blit in one drawImage call,
+        // so captureStream never snapshots a partially-drawn frame.
+        this._off    = document.createElement('canvas')
+        this._off.width  = canvas.width
+        this._off.height = canvas.height
+        this._offctx = this._off.getContext('2d')
     }
 
     // ── Source elements ──────────────────────────────────────────────────────
@@ -57,23 +64,34 @@ export class Compositor {
     }
 
     _draw() {
-        const { canvas, ctx } = this
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        ctx.fillStyle = '#000'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        const { canvas, ctx, _off: off, _offctx: offctx } = this
+
+        // Compose into offscreen buffer
+        offctx.clearRect(0, 0, off.width, off.height)
+        offctx.fillStyle = '#000'
+        offctx.fillRect(0, 0, off.width, off.height)
 
         if (this._transition) {
-            this._drawTransition()
+            this._drawTransition(offctx)
         } else {
-            this._drawLayers(this.layers, 1)
+            this._drawLayers(this.layers, 1, offctx)
         }
+
+        // Single atomic blit to the captured canvas — captureStream sees
+        // either the previous complete frame or this new one, never a partial.
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(off, 0, 0)
     }
 
-    _drawLayers(layers, masterOpacity) {
-        const { canvas, ctx } = this
+    _drawLayers(layers, masterOpacity, ctx) {
+        const { canvas } = this
         const visible = layers.filter(l => l.visible && l.el)
 
         for (const layer of visible) {
+            // Skip if the video element hasn't decoded a frame yet — avoids
+            // brief black flashes when a source stalls or restarts.
+            if (layer.el.readyState < 2) continue
+
             const x = layer.x * canvas.width
             const y = layer.y * canvas.height
             const w = layer.w * canvas.width
@@ -83,7 +101,7 @@ export class Compositor {
             ctx.globalAlpha = layer.opacity * masterOpacity
             try {
                 ctx.drawImage(layer.el, x, y, w, h)
-            } catch { /* source not ready */ }
+            } catch { /* source frame unavailable */ }
             ctx.restore()
         }
     }
@@ -114,18 +132,18 @@ export class Compositor {
         }
     }
 
-    _drawTransition() {
+    _drawTransition(ctx) {
         const t   = this._transition
         const now = performance.now()
         const p   = Math.min(1, (now - t.startedAt) / t.duration)
 
         if (t.type === 'fade') {
-            this._drawLayers(t.fromLayers, 1 - p)
-            this._drawLayers(t.toLayers,   p)
+            this._drawLayers(t.fromLayers, 1 - p, ctx)
+            this._drawLayers(t.toLayers,   p,     ctx)
         }
 
         if (p >= 1) {
-            this.layers     = t.toLayers
+            this.layers      = t.toLayers
             this._transition = null
         }
     }
