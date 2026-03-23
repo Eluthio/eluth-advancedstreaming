@@ -183,10 +183,11 @@ async function ensureSourceActive(key) {
     if (!src) return
     try {
         const stream = await src.getStream()
+        if (!stream) return  // source not configured (e.g. Plex with no content selected)
         sourceStreams[key] = stream
         nextTick(() => attachStreamToEl(key, stream))
     } catch (e) {
-        console.warn('[AdvancedStreaming] Failed to get stream for', key, e)
+        if (e?.message !== 'cancelled') console.warn('[AdvancedStreaming] Failed to get stream for', key, e)
     }
 }
 
@@ -349,10 +350,21 @@ function broadcastState() {
                 outputWidth:  outputWidth.value,
                 outputHeight: outputHeight.value,
             },
+            pluginStates: {
+                plex: window.__EluthStreamSources?.['plex']?.getState?.() ?? null,
+            },
         })
     } catch (e) {
         console.error('[AdvancedStreaming] broadcastState failed:', e)
     }
+}
+
+// Lightweight broadcast for frequent Plex state changes (timeupdate etc.)
+function broadcastPlexState() {
+    if (!bc) return
+    const state = window.__EluthStreamSources?.['plex']?.getState?.()
+    if (!state) return
+    try { bc.postMessage({ type: 'plex-state', plex: state }) } catch {}
 }
 
 function onBcMessage(e) {
@@ -419,6 +431,14 @@ function onBcMessage(e) {
 
         case 'stop-stream':
             stopStream()
+            break
+
+        case 'plex-play':
+        case 'plex-pause':
+        case 'plex-resume':
+        case 'plex-seek':
+        case 'plex-stop':
+            window.__EluthStreamSources?.['plex']?.handleMessage?.(msg)
             break
 
         case 'update-settings': {
@@ -500,6 +520,8 @@ onMounted(() => {
     bc = new BroadcastChannel(`eluth-stream-${props.channelId}`)
     bc.addEventListener('message', onBcMessage)
     window.addEventListener('beforeunload', beaconStop)
+    // Wire up Plex state changes → lightweight broadcast to popup
+    window.__EluthStreamSources?.['plex']?.setStateCallback?.(broadcastPlexState)
 })
 
 onUnmounted(() => {
