@@ -148,8 +148,8 @@
                     </div>
 
                     <div style="display:flex;gap:8px;margin-top:16px;">
-                        <button class="as-go-live-btn" style="flex:1;margin:0;padding:8px;" :disabled="savingSettings" @click="saveSettings">
-                            {{ settingsSaved ? '✓ Saved' : savingSettings ? 'Saving…' : 'Save' }}
+                        <button class="as-go-live-btn" style="flex:1;margin:0;padding:8px;" @click="saveSettings">
+                            {{ settingsSaved ? '✓ Saved' : 'Save' }}
                         </button>
                         <button class="as-source-cancel" style="flex:1;" @click="showSettings = false">Cancel</button>
                     </div>
@@ -186,11 +186,18 @@ const props = defineProps({
     canStream:     { type: Boolean, default: false },
 })
 
-// ── Settings ────────────────────────────────────────────────────────────────
-const enabledSources = computed(() => props.settings.enabledSources ?? ['camera', 'screen'])
-const transition     = computed(() => props.settings.transition ?? { type: 'fade', duration: 400 })
-const outputWidth    = computed(() => props.settings.outputWidth  ?? 1280)
-const outputHeight   = computed(() => props.settings.outputHeight ?? 720)
+// ── Settings (stored in localStorage) ────────────────────────────────────────
+const SETTINGS_KEY = 'advanced-streaming-settings'
+
+function loadStoredSettings() {
+    try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') } catch { return {} }
+}
+
+const storedSettings  = ref(loadStoredSettings())
+const enabledSources  = computed(() => storedSettings.value.enabledSources ?? ['camera', 'screen'])
+const transition      = computed(() => storedSettings.value.transition     ?? { type: 'fade', duration: 400 })
+const outputWidth     = computed(() => storedSettings.value.outputWidth    ?? 1280)
+const outputHeight    = computed(() => storedSettings.value.outputHeight   ?? 720)
 
 // ── Scene state ──────────────────────────────────────────────────────────────
 const scenes        = ref([])
@@ -340,40 +347,33 @@ const settingsForm = ref({
     outputWidth:        1280,
     outputHeight:       720,
 })
-const savingSettings = ref(false)
-const settingsSaved  = ref(false)
+const settingsSaved = ref(false)
 
 function openSettings() {
     // Refresh source list at open time so late-loading plugins (e.g. Plex) are included
     allKnownSources.value = Object.entries(window.__EluthStreamSources ?? {}).map(([key, src]) => ({ key, ...src }))
+    const s = storedSettings.value
     settingsForm.value = {
-        enabledSources:     [...(props.settings.enabledSources ?? ['camera', 'screen'])],
-        transitionType:     props.settings.transition?.type     ?? 'fade',
-        transitionDuration: props.settings.transition?.duration ?? 400,
-        outputWidth:        props.settings.outputWidth  ?? 1280,
-        outputHeight:       props.settings.outputHeight ?? 720,
+        enabledSources:     [...(s.enabledSources     ?? ['camera', 'screen'])],
+        transitionType:     s.transition?.type         ?? 'fade',
+        transitionDuration: s.transition?.duration     ?? 400,
+        outputWidth:        s.outputWidth              ?? 1280,
+        outputHeight:       s.outputHeight             ?? 720,
     }
     showSettings.value = true
 }
 
-async function saveSettings() {
-    savingSettings.value = true
-    try {
-        await fetch(`${props.apiBase}/admin/plugins/advanced-streaming/settings`, {
-            method:  'POST',
-            headers: { 'Authorization': `Bearer ${props.authToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                enabledSources:     settingsForm.value.enabledSources,
-                transition:         { type: settingsForm.value.transitionType, duration: settingsForm.value.transitionDuration },
-                outputWidth:        settingsForm.value.outputWidth,
-                outputHeight:       settingsForm.value.outputHeight,
-            }),
-        })
-        settingsSaved.value = true
-        setTimeout(() => { settingsSaved.value = false; showSettings.value = false }, 1200)
-    } finally {
-        savingSettings.value = false
+function saveSettings() {
+    const newSettings = {
+        enabledSources: settingsForm.value.enabledSources,
+        transition:     { type: settingsForm.value.transitionType, duration: settingsForm.value.transitionDuration },
+        outputWidth:    settingsForm.value.outputWidth,
+        outputHeight:   settingsForm.value.outputHeight,
     }
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings))
+    storedSettings.value = newSettings
+    settingsSaved.value  = true
+    setTimeout(() => { settingsSaved.value = false; showSettings.value = false }, 800)
 }
 
 function toggleEnabledSource(key) {
