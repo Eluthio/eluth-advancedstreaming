@@ -3,6 +3,7 @@
 
         <!-- Pre-stream setup (not live yet) -->
         <div v-if="!isStreaming" class="as-setup">
+            <button v-if="isAdmin" class="as-settings-btn" @click="openSettings" title="Plugin settings">⚙</button>
             <div class="as-setup-inner">
                 <div class="as-setup-logo">🎬</div>
                 <div class="as-setup-title">Advanced Streaming</div>
@@ -102,6 +103,60 @@
             @pick="addLayer"
             @close="showSourcePicker = false"
         />
+
+        <!-- Settings modal -->
+        <Teleport to="body">
+            <div v-if="showSettings" class="as-source-overlay" @click.self="showSettings = false">
+                <div class="as-source-modal" style="max-width:420px;">
+                    <div class="as-source-title">Advanced Streaming — Settings</div>
+
+                    <div class="as-settings-section">
+                        <div class="as-settings-label">Available Sources</div>
+                        <div class="as-settings-sources">
+                            <label v-for="src in allKnownSources" :key="src.key" class="as-settings-source-row">
+                                <input type="checkbox"
+                                    :checked="settingsForm.enabledSources.includes(src.key)"
+                                    @change="toggleEnabledSource(src.key)"
+                                />
+                                <span>{{ src.icon }} {{ src.label }}</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="as-settings-section">
+                        <div class="as-settings-label">Default Transition</div>
+                        <div class="as-settings-row">
+                            <select class="as-settings-select" v-model="settingsForm.transitionType">
+                                <option value="cut">Cut</option>
+                                <option value="fade">Fade</option>
+                            </select>
+                            <template v-if="settingsForm.transitionType !== 'cut'">
+                                <input type="number" class="as-settings-input" v-model.number="settingsForm.transitionDuration" min="100" max="2000" step="100" />
+                                <span class="as-settings-unit">ms</span>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="as-settings-section">
+                        <div class="as-settings-label">Output Resolution</div>
+                        <div class="as-settings-row">
+                            <select class="as-settings-select" v-model.number="settingsForm.outputWidth" @change="settingsForm.outputHeight = settingsForm.outputWidth === 1920 ? 1080 : settingsForm.outputWidth === 1280 ? 720 : 480">
+                                <option :value="854">480p</option>
+                                <option :value="1280">720p</option>
+                                <option :value="1920">1080p</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:8px;margin-top:16px;">
+                        <button class="as-go-live-btn" style="flex:1;margin:0;padding:8px;" :disabled="savingSettings" @click="saveSettings">
+                            {{ settingsSaved ? '✓ Saved' : savingSettings ? 'Saving…' : 'Save' }}
+                        </button>
+                        <button class="as-source-cancel" style="flex:1;" @click="showSettings = false">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
 
         <!-- Hidden video elements for each active source -->
         <div style="display:none">
@@ -268,13 +323,66 @@ let streamSeq     = 0
 let streamTimer   = null
 let streamStartTs = 0
 
-const canvasEl      = ref(null)
-const previewWrap   = ref(null)
-const isStreaming    = ref(false)
-const goingLive      = ref(false)
-const streamError    = ref('')
-const streamDuration = ref('0:00')
+const canvasEl         = ref(null)
+const previewWrap      = ref(null)
+const isStreaming      = ref(false)
+const goingLive        = ref(false)
+const streamError      = ref('')
+const streamDuration   = ref('0:00')
 const showSourcePicker = ref(false)
+const showSettings     = ref(false)
+
+const isAdmin = computed(() => props.currentMember?.can?.('manage_server') ?? false)
+
+// Local copy of settings for the modal
+const settingsForm = ref({
+    enabledSources:     [],
+    transitionType:     'fade',
+    transitionDuration: 400,
+    outputWidth:        1280,
+    outputHeight:       720,
+})
+const savingSettings = ref(false)
+const settingsSaved  = ref(false)
+
+function openSettings() {
+    settingsForm.value = {
+        enabledSources:     [...(props.settings.enabledSources ?? ['camera', 'screen'])],
+        transitionType:     props.settings.transition?.type     ?? 'fade',
+        transitionDuration: props.settings.transition?.duration ?? 400,
+        outputWidth:        props.settings.outputWidth  ?? 1280,
+        outputHeight:       props.settings.outputHeight ?? 720,
+    }
+    showSettings.value = true
+}
+
+async function saveSettings() {
+    savingSettings.value = true
+    try {
+        await fetch(`${props.apiBase}/admin/plugins/advanced-streaming/settings`, {
+            method:  'POST',
+            headers: { 'Authorization': `Bearer ${props.authToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                enabledSources:     settingsForm.value.enabledSources,
+                transition:         { type: settingsForm.value.transitionType, duration: settingsForm.value.transitionDuration },
+                outputWidth:        settingsForm.value.outputWidth,
+                outputHeight:       settingsForm.value.outputHeight,
+            }),
+        })
+        settingsSaved.value = true
+        setTimeout(() => { settingsSaved.value = false; showSettings.value = false }, 1200)
+    } finally {
+        savingSettings.value = false
+    }
+}
+
+function toggleEnabledSource(key) {
+    const idx = settingsForm.value.enabledSources.indexOf(key)
+    if (idx === -1) settingsForm.value.enabledSources.push(key)
+    else settingsForm.value.enabledSources.splice(idx, 1)
+}
+
+const allKnownSources = computed(() => Object.entries(window.__EluthStreamSources ?? {}).map(([key, src]) => ({ key, ...src })))
 
 function updateDuration() {
     const elapsed = Math.floor((Date.now() - streamStartTs) / 1000)
@@ -308,6 +416,13 @@ async function goLive() {
             return
         }
 
+        // Show live view first so canvas mounts, then create compositor
+        streamSeq         = 0
+        streamStartTs     = Date.now()
+        isStreaming.value = true
+        goingLive.value   = false
+        await nextTick()
+
         // Start compositor
         compositor = new Compositor(canvasEl.value)
         compositor.setLayers(activeScene.value?.layers ?? [])
@@ -323,11 +438,6 @@ async function goLive() {
             ? 'video/webm;codecs=vp8,opus'
             : 'video/webm'
         mediaRecorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 2_500_000 })
-
-        streamSeq     = 0
-        streamStartTs = Date.now()
-        isStreaming.value = true
-        goingLive.value   = false
 
         mediaRecorder.ondataavailable = async (e) => {
             if (!e.data?.size) return
@@ -479,7 +589,31 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.as-root { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #0f1117; color: #e2e8f0; }
+.as-root { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #0f1117; color: #e2e8f0; position: relative; }
+
+.as-settings-btn {
+    position: absolute; top: 12px; right: 12px; z-index: 10;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: #64748b; border-radius: 6px; padding: 6px 10px; font-size: 15px;
+    cursor: pointer; transition: all 0.15s;
+}
+.as-settings-btn:hover { color: #e2e8f0; background: rgba(255,255,255,0.12); }
+
+.as-settings-section { margin-bottom: 16px; }
+.as-settings-label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.as-settings-sources { display: flex; flex-direction: column; gap: 6px; }
+.as-settings-source-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #cbd5e1; cursor: pointer; }
+.as-settings-source-row input { accent-color: var(--accent, #5865f2); }
+.as-settings-row { display: flex; align-items: center; gap: 8px; }
+.as-settings-select {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: #e2e8f0; border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer;
+}
+.as-settings-input {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: #e2e8f0; border-radius: 6px; padding: 6px 10px; font-size: 13px; width: 80px;
+}
+.as-settings-unit { font-size: 12px; color: #64748b; }
 
 /* ── Setup screen ── */
 .as-setup { display: flex; align-items: center; justify-content: center; flex: 1; padding: 24px; }
