@@ -573,12 +573,29 @@ function registerBuiltinSources() {
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
+function beaconStop() {
+    if (!isStreaming.value) return
+    // sendBeacon works during page unload; fetch does not
+    navigator.sendBeacon(
+        `${props.apiBase}/streams/${props.channelId}/stop`,
+        new Blob([JSON.stringify({})], { type: 'application/json' })
+    )
+    // Add auth header via a FormData trick isn't possible with sendBeacon,
+    // so we fall back to a synchronous XMLHttpRequest
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${props.apiBase}/streams/${props.channelId}/stop`, false) // sync
+    xhr.setRequestHeader('Authorization', `Bearer ${props.authToken}`)
+    try { xhr.send() } catch { /* page unloading */ }
+}
+
 onMounted(() => {
     registerBuiltinSources()
     loadScenes()
+    window.addEventListener('beforeunload', beaconStop)
 })
 
 onUnmounted(() => {
+    window.removeEventListener('beforeunload', beaconStop)
     if (isStreaming.value) stopStream()
     window.removeEventListener('mousemove', onDragMove)
     window.removeEventListener('mouseup',   onDragEnd)
