@@ -187,6 +187,7 @@ async function ensureSourceActive(key) {
         const stream = await src.getStream()
         if (!stream) return  // source not configured (e.g. Plex with no content selected)
         sourceStreams[key] = stream
+        if (isStreaming.value) connectSourceAudio(key, stream)
         nextTick(() => attachStreamToEl(key, stream))
     } catch (e) {
         if (e?.message !== 'cancelled') console.warn('[AdvancedStreaming] Failed to get stream for', key, e)
@@ -208,6 +209,122 @@ function registerSourceEl(key, el) {
     if (!el) { delete sourceElMap[key]; return }
     sourceElMap[key] = el
     if (sourceStreams[key]) attachStreamToEl(key, sourceStreams[key])
+}
+
+// ── Audio mixer ───────────────────────────────────────────────────────────────
+let audioCtx        = null
+let audioDest       = null
+let audioLevelTimer = null
+const audioGains    = {}  // sourceKey → { gainNode, analyser, source, gain, muted }
+
+const AUDIO_KEY = () => `as_audio_${props.channelId}`
+
+function loadAudioSettings() {
+    try {
+        const raw = localStorage.getItem(AUDIO_KEY())
+        if (!raw) return
+        const saved = JSON.parse(raw)
+        for (const [key, d] of Object.entries(saved)) {
+            audioGains[key] = { gain: d.gain ?? 1, muted: d.muted ?? false }
+        }
+    } catch { /* ignore */ }
+}
+
+function saveAudioSettings() {
+    try {
+        const out = {}
+        for (const [k, d] of Object.entries(audioGains)) out[k] = { gain: d.gain, muted: d.muted }
+        localStorage.setItem(AUDIO_KEY(), JSON.stringify(out))
+    } catch { /* ignore */ }
+}
+
+function initAudioContext() {
+    if (audioCtx) return
+    audioCtx = new AudioContext()
+    audioDest = audioCtx.createMediaStreamDestination()
+}
+
+function connectSourceAudio(key, stream) {
+    if (!audioCtx || !stream) return
+    const tracks = stream.getAudioTracks()
+    if (!tracks.length) return
+    if (audioGains[key]?.source) return  // already connected
+
+    const saved   = audioGains[key] ?? { gain: 1, muted: false }
+    const gainNode = audioCtx.createGain()
+    gainNode.gain.value = saved.muted ? 0 : saved.gain
+
+    const analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 512
+    analyser.smoothingTimeConstant = 0.75
+
+    // Use only first audio track to avoid channel issues
+    const source = audioCtx.createMediaStreamSource(new MediaStream([tracks[0]]))
+    source.connect(gainNode)
+    gainNode.connect(analyser)
+    gainNode.connect(audioDest)
+
+    audioGains[key] = { ...saved, gainNode, analyser, source }
+}
+
+function setAudioGain(key, gain) {
+    if (!audioGains[key]) audioGains[key] = { gain, muted: false }
+    else audioGains[key].gain = gain
+    if (audioGains[key].gainNode && !audioGains[key].muted) {
+        audioGains[key].gainNode.gain.value = gain
+    }
+    saveAudioSettings()
+    broadcastState()
+}
+
+function setAudioMute(key, muted) {
+    if (!audioGains[key]) return
+    audioGains[key].muted = muted
+    if (audioGains[key].gainNode) {
+        audioGains[key].gainNode.gain.value = muted ? 0 : audioGains[key].gain
+    }
+    saveAudioSettings()
+    broadcastState()
+}
+
+function getAudioLevel(key) {
+    const entry = audioGains[key]
+    if (!entry?.analyser || entry.muted) return 0
+    const data = new Uint8Array(entry.analyser.frequencyBinCount)
+    entry.analyser.getByteTimeDomainData(data)
+    let sum = 0
+    for (const v of data) sum += ((v - 128) / 128) ** 2
+    return Math.min(1, Math.sqrt(sum / data.length) * 4)  // scale up for visual clarity
+}
+
+function broadcastAudioLevels() {
+    if (!bc) return
+    const levels = {}
+    for (const key of Object.keys(audioGains)) levels[key] = getAudioLevel(key)
+    try { bc.postMessage({ type: 'audio-levels', levels }) } catch {}
+}
+
+function buildAudioChannels() {
+    const out = {}
+    for (const [key, d] of Object.entries(audioGains)) {
+        out[key] = {
+            gain:  d.gain,
+            muted: d.muted,
+            label: window.__EluthStreamSources?.[key]?.label ?? key,
+            icon:  window.__EluthStreamSources?.[key]?.icon  ?? '🎵',
+        }
+    }
+    return out
+}
+
+function stopAudio() {
+    clearInterval(audioLevelTimer)
+    audioLevelTimer = null
+    if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; audioDest = null }
+    // Keep gain/mute settings but clear live nodes
+    for (const d of Object.values(audioGains)) {
+        delete d.gainNode; delete d.analyser; delete d.source
+    }
 }
 
 // ── Streaming ─────────────────────────────────────────────────────────────────
@@ -269,7 +386,17 @@ async function goLive() {
         }
         compositor.start()
 
+        // Build audio mix from all active sources
+        initAudioContext()
+        for (const [key, stream] of Object.entries(sourceStreams)) {
+            connectSourceAudio(key, stream)
+        }
+
         const canvasStream = compositor.captureStream(30)
+        // Add mixed audio track to the stream
+        const audioTrack = audioDest?.stream.getAudioTracks()[0]
+        if (audioTrack) canvasStream.addTrack(audioTrack)
+
         const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
             ? 'video/webm;codecs=vp8,opus'
             : 'video/webm'
@@ -289,7 +416,9 @@ async function goLive() {
         }
 
         mediaRecorder.start(2000)
-        streamTimer = setInterval(updateDuration, 1000)
+        streamTimer      = setInterval(updateDuration, 1000)
+        audioLevelTimer  = setInterval(broadcastAudioLevels, 80)
+        broadcastState()  // push initial audioChannels to popup
 
     } catch (e) {
         streamError.value = 'Could not start stream: ' + e.message
@@ -300,6 +429,7 @@ async function goLive() {
 async function stopStream() {
     mediaRecorder?.stop()
     clearInterval(streamTimer)
+    stopAudio()
     compositor?.stop()
     compositor = null
     isStreaming.value = false
@@ -323,7 +453,7 @@ function openControlPanel() {
         return
     }
     const url = `${window.location.origin}/?popup=stream-control&channel=${props.channelId}`
-    popupWindow = window.open(url, `stream-control-${props.channelId}`, 'width=740,height=580,resizable=yes')
+    popupWindow = window.open(url, `stream-control-${props.channelId}`, 'width=980,height=640,resizable=yes')
     // Push state once popup has had time to mount and set up its BroadcastChannel
     setTimeout(() => broadcastState(), 800)
     setTimeout(() => broadcastState(), 2000)
@@ -357,6 +487,7 @@ function broadcastState() {
             pluginStates: {
                 plex: window.__EluthStreamSources?.['plex']?.getState?.() ?? null,
             },
+            audioChannels: buildAudioChannels(),
         })
     } catch (e) {
         console.error('[AdvancedStreaming] broadcastState failed:', e)
@@ -445,6 +576,14 @@ function onBcMessage(e) {
             window.__EluthStreamSources?.['plex']?.handleMessage?.(msg)
             break
 
+        case 'set-audio-gain':
+            setAudioGain(msg.sourceKey, msg.gain)
+            break
+
+        case 'set-audio-mute':
+            setAudioMute(msg.sourceKey, msg.muted)
+            break
+
         case 'update-settings': {
             const s = storedSettings.value
             const ns = {
@@ -521,6 +660,7 @@ function beaconStop() {
 onMounted(() => {
     registerBuiltinSources()
     loadScenes()
+    loadAudioSettings()
     bc = new BroadcastChannel(`eluth-stream-${props.channelId}`)
     bc.addEventListener('message', onBcMessage)
     window.addEventListener('beforeunload', beaconStop)
