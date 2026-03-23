@@ -319,6 +319,9 @@ function openControlPanel() {
     }
     const url = `${window.location.origin}/?popup=stream-control&channel=${props.channelId}`
     popupWindow = window.open(url, `stream-control-${props.channelId}`, 'width=740,height=580,resizable=yes')
+    // Push state once popup has had time to mount and set up its BroadcastChannel
+    setTimeout(() => broadcastState(), 800)
+    setTimeout(() => broadcastState(), 2000)
 }
 
 function buildSourceRegistry() {
@@ -333,19 +336,23 @@ function buildSourceRegistry() {
 
 function broadcastState() {
     if (!bc) return
-    bc.postMessage({
-        type:           'state',
-        scenes:         scenes.value,
-        activeSceneId:  activeSceneId.value,
-        isStreaming:    isStreaming.value,
-        streamDuration: streamDuration.value,
-        sourceRegistry: buildSourceRegistry(),
-        settings: {
-            transition:  transition.value,
-            outputWidth:  outputWidth.value,
-            outputHeight: outputHeight.value,
-        },
-    })
+    try {
+        bc.postMessage({
+            type:           'state',
+            scenes:         JSON.parse(JSON.stringify(scenes.value)),
+            activeSceneId:  activeSceneId.value,
+            isStreaming:    isStreaming.value,
+            streamDuration: streamDuration.value,
+            sourceRegistry: buildSourceRegistry(),
+            settings: {
+                transition:   JSON.parse(JSON.stringify(transition.value)),
+                outputWidth:  outputWidth.value,
+                outputHeight: outputHeight.value,
+            },
+        })
+    } catch (e) {
+        console.error('[AdvancedStreaming] broadcastState failed:', e)
+    }
 }
 
 function onBcMessage(e) {
