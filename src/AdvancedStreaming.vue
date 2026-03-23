@@ -105,8 +105,7 @@
         />
 
         <!-- Settings modal -->
-        <Teleport to="body">
-            <div v-if="showSettings" class="as-source-overlay" @click.self="showSettings = false">
+        <div v-if="showSettings" class="as-source-overlay" @click.self="showSettings = false">
                 <div class="as-source-modal" style="max-width:420px;">
                     <div class="as-source-title">Advanced Streaming — Settings</div>
 
@@ -156,7 +155,6 @@
                     </div>
                 </div>
             </div>
-        </Teleport>
 
         <!-- Hidden video elements for each active source -->
         <div style="display:none">

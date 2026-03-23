@@ -1,6 +1,5 @@
 <template>
-    <Teleport to="body">
-        <div class="as-source-overlay" @click.self="$emit('close')">
+    <div class="as-source-overlay" @click.self="$emit('close')">
             <div class="as-source-modal">
                 <div class="as-source-title">Add Source</div>
                 <div class="as-source-grid">
@@ -19,8 +18,7 @@
                 </div>
                 <button class="as-source-cancel" @click="$emit('close')">Cancel</button>
             </div>
-        </div>
-    </Teleport>
+    </div>
 </template>
 
 <script setup>
