@@ -26,6 +26,7 @@
                         @select="selectedLayerId = $event"
                         @toggle-visible="toggleLayerVisible"
                         @set-opacity="setLayerOpacity"
+                        @set-transform="setLayerTransform"
                         @remove-layer="removeLayer"
                         @add-layer="showSourcePicker = true"
                     />
@@ -91,6 +92,7 @@
                 @select="selectedLayerId = $event"
                 @toggle-visible="toggleLayerVisible"
                 @set-opacity="setLayerOpacity"
+                @set-transform="setLayerTransform"
                 @remove-layer="removeLayer"
                 @add-layer="showSourcePicker = true"
             />
@@ -100,9 +102,28 @@
         <SourcePicker
             v-if="showSourcePicker"
             :enabled-sources="enabledSources"
-            @pick="addLayer"
+            @pick="onSourcePicked"
             @close="showSourcePicker = false"
         />
+
+        <!-- Camera device picker -->
+        <div v-if="showDevicePicker" class="as-source-overlay" @click.self="showDevicePicker = false">
+            <div class="as-source-modal" style="max-width:360px;padding:24px;">
+                <div class="as-source-title">Choose Camera</div>
+                <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;">
+                    <button
+                        v-for="dev in availableDevices"
+                        :key="dev.deviceId"
+                        class="as-device-btn"
+                        @click="pickDevice(dev.deviceId)"
+                    >
+                        <span style="font-size:16px">📷</span>
+                        <span style="flex:1;text-align:left;font-size:13px">{{ dev.label }}</span>
+                    </button>
+                </div>
+                <button class="as-source-cancel" @click="showDevicePicker = false">Cancel</button>
+            </div>
+        </div>
 
         <!-- Settings modal -->
         <div v-if="showSettings" class="as-source-overlay" @click.self="showSettings = false">
@@ -244,8 +265,45 @@ function switchSceneLive(id) {
 }
 
 // ── Layer management ─────────────────────────────────────────────────────────
-function addLayer(sourceKey) {
+const showDevicePicker  = ref(false)
+const availableDevices  = ref([])   // [{ deviceId, label }]
+
+async function onSourcePicked(sourceKey) {
     showSourcePicker.value = false
+    // Camera: enumerate devices so user can pick which one
+    if (sourceKey === 'camera') {
+        try {
+            const all = await navigator.mediaDevices.enumerateDevices()
+            const cams = all.filter(d => d.kind === 'videoinput' && d.label)
+            if (cams.length > 1) {
+                availableDevices.value = cams
+                showDevicePicker.value = true
+                return
+            }
+        } catch { /* permission not yet granted — fall through to default */ }
+    }
+    doAddLayer(sourceKey)
+}
+
+function pickDevice(deviceId) {
+    showDevicePicker.value = false
+    // Register a device-specific source keyed by deviceId prefix
+    const key   = `camera_${deviceId.slice(0, 12)}`
+    const label = availableDevices.value.find(d => d.deviceId === deviceId)?.label ?? 'Camera'
+    if (!window.__EluthStreamSources[key]) {
+        window.__EluthStreamSources[key] = {
+            label,
+            icon: '📷',
+            getStream: () => navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { exact: deviceId } },
+                audio: true,
+            }),
+        }
+    }
+    doAddLayer(key)
+}
+
+function doAddLayer(sourceKey) {
     const scene = activeScene.value
     if (!scene) return
     scene.layers.push({
@@ -257,6 +315,14 @@ function addLayer(sourceKey) {
     })
     ensureSourceActive(sourceKey)
     if (compositor) compositor.setLayers(scene.layers)
+    saveScenes()
+}
+
+function setLayerTransform({ id, x, y, w, h }) {
+    const layer = activeScene.value?.layers.find(l => l.id === id)
+    if (!layer) return
+    layer.x = x; layer.y = y; layer.w = w; layer.h = h
+    compositor?.setLayers(activeScene.value.layers)
     saveScenes()
 }
 
@@ -631,6 +697,13 @@ onUnmounted(() => {
     color: #e2e8f0; border-radius: 6px; padding: 6px 10px; font-size: 13px; width: 80px;
 }
 .as-settings-unit { font-size: 12px; color: #64748b; }
+.as-device-btn {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+    color: #e2e8f0; cursor: pointer; transition: all 0.15s; width: 100%;
+}
+.as-device-btn:hover { background: rgba(255,255,255,0.1); border-color: var(--accent, #5865f2); }
 
 /* ── Setup screen ── */
 .as-setup { display: flex; align-items: center; justify-content: center; flex: 1; padding: 24px; }
