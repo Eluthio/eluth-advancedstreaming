@@ -36,6 +36,6 @@ if (css) {
 cpSync(resolve(root, 'plugin.json'), resolve(distDir, 'plugin.json'))
 
 // Create zip
-const zipPath = resolve(root, 'advanced-streaming.zip')
+const zipPath = resolve(root, 'plugin.zip')
 execSync(`cd "${distDir}" && zip -r "${zipPath}" .`, { stdio: 'inherit' })
 console.log(`Built: ${zipPath}`)

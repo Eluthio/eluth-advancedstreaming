@@ -4,6 +4,6 @@
   "description": "OBS-style compositor for stream channels. Layer sources (camera, screen, Plex, and more), manage scenes, apply transitions — all without leaving Eluth.",
   "author": "Eluth",
   "tier": "community",
-  "repository": "https://github.com/Eluthio/eluth-advanced-streaming",
-  "latest_release": "https://github.com/Eluthio/eluth-advanced-streaming/releases/latest/download/advanced-streaming.zip"
+  "repository": "https://github.com/Eluthio/eluth-advancedstreaming",
+  "latest_release": "https://github.com/Eluthio/eluth-advancedstreaming/releases/latest/download/plugin.zip"
 }
