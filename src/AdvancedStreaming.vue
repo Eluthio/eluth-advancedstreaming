@@ -70,10 +70,12 @@ function loadStoredSettings() {
 }
 
 const storedSettings = ref(loadStoredSettings())
-const enabledSources = computed(() => storedSettings.value.enabledSources ?? ['camera', 'screen'])
-const transition     = computed(() => storedSettings.value.transition     ?? { type: 'fade', duration: 400 })
-const outputWidth    = computed(() => storedSettings.value.outputWidth    ?? 1280)
-const outputHeight   = computed(() => storedSettings.value.outputHeight   ?? 720)
+const enabledSources  = computed(() => storedSettings.value.enabledSources ?? ['camera', 'screen'])
+const transition      = computed(() => storedSettings.value.transition     ?? { type: 'fade', duration: 400 })
+const outputWidth     = computed(() => storedSettings.value.outputWidth    ?? 1280)
+const outputHeight    = computed(() => storedSettings.value.outputHeight   ?? 720)
+const monitorVolume   = computed(() => storedSettings.value.monitorVolume  ?? 1)
+const monitorMuted    = computed(() => storedSettings.value.monitorMuted   ?? true)   // default off to avoid feedback
 
 // ── Scene state ───────────────────────────────────────────────────────────────
 const scenes         = ref([])
@@ -212,10 +214,11 @@ function registerSourceEl(key, el) {
 }
 
 // ── Audio mixer ───────────────────────────────────────────────────────────────
-let audioCtx        = null
-let audioDest       = null
-let audioLevelTimer = null
-const audioGains    = {}  // sourceKey → { gainNode, analyser, source, gain, muted }
+let audioCtx         = null
+let audioDest        = null
+let monitorGainNode  = null
+let audioLevelTimer  = null
+const audioGains     = {}  // sourceKey → { gainNode, analyser, source, gain, muted }
 
 const AUDIO_KEY = () => `as_audio_${props.channelId}`
 
@@ -242,6 +245,11 @@ function initAudioContext() {
     if (audioCtx) return
     audioCtx = new AudioContext()
     audioDest = audioCtx.createMediaStreamDestination()
+    audioCtx.resume().catch(() => {})  // Chrome/Electron starts AudioContext suspended
+
+    monitorGainNode = audioCtx.createGain()
+    monitorGainNode.gain.value = monitorMuted.value ? 0 : monitorVolume.value
+    monitorGainNode.connect(audioCtx.destination)
 }
 
 function connectSourceAudio(key, stream) {
@@ -263,6 +271,7 @@ function connectSourceAudio(key, stream) {
     source.connect(gainNode)
     gainNode.connect(analyser)
     gainNode.connect(audioDest)
+    if (monitorGainNode) gainNode.connect(monitorGainNode)
 
     audioGains[key] = { ...saved, gainNode, analyser, source }
 }
@@ -284,6 +293,24 @@ function setAudioMute(key, muted) {
         audioGains[key].gainNode.gain.value = muted ? 0 : audioGains[key].gain
     }
     saveAudioSettings()
+    broadcastState()
+}
+
+function saveMonitorSettings(volume, muted) {
+    const ns = { ...storedSettings.value, monitorVolume: volume, monitorMuted: muted }
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(ns))
+    storedSettings.value = ns
+}
+
+function setMonitorVolume(volume) {
+    if (monitorGainNode && !monitorMuted.value) monitorGainNode.gain.value = volume
+    saveMonitorSettings(volume, monitorMuted.value)
+    broadcastState()
+}
+
+function setMonitorMuted(muted) {
+    if (monitorGainNode) monitorGainNode.gain.value = muted ? 0 : monitorVolume.value
+    saveMonitorSettings(monitorVolume.value, muted)
     broadcastState()
 }
 
@@ -492,7 +519,9 @@ function broadcastState() {
             pluginStates: {
                 plex: window.__EluthStreamSources?.['plex']?.getState?.() ?? null,
             },
-            audioChannels: buildAudioChannels(),
+            audioChannels:  buildAudioChannels(),
+            monitorVolume:  monitorVolume.value,
+            monitorMuted:   monitorMuted.value,
         })
     } catch (e) {
         console.error('[AdvancedStreaming] broadcastState failed:', e)
@@ -599,6 +628,14 @@ function onBcMessage(e) {
 
         case 'set-audio-mute':
             setAudioMute(msg.sourceKey, msg.muted)
+            break
+
+        case 'set-monitor-volume':
+            setMonitorVolume(msg.volume)
+            break
+
+        case 'set-monitor-muted':
+            setMonitorMuted(msg.muted)
             break
 
         case 'update-settings': {
