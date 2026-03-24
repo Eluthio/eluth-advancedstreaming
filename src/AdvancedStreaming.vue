@@ -573,7 +573,19 @@ function onBcMessage(e) {
             stopStream()
             break
 
-        case 'plex-play':
+        case 'plex-play': {
+            const src = window.__EluthStreamSources?.['plex']
+            if (!src) break
+            // handleMessage returns the startPlayback promise — await it then attach
+            ;(async () => {
+                const stream = await src.handleMessage?.(msg)
+                if (!stream) return
+                sourceStreams['plex'] = stream
+                if (isStreaming.value) connectSourceAudio('plex', stream)
+                nextTick(() => attachStreamToEl('plex', stream))
+            })()
+            break
+        }
         case 'plex-pause':
         case 'plex-resume':
         case 'plex-seek':
