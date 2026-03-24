@@ -459,10 +459,15 @@ function openControlPanel() {
     setTimeout(() => broadcastState(), 2000)
 }
 
+const BUILTIN_SOURCES = ['camera', 'screen']
+
 function buildSourceRegistry() {
     const reg = {}
     for (const [k, v] of Object.entries(window.__EluthStreamSources ?? {})) {
-        if (enabledSources.value.includes(k) || k.startsWith('camera_')) {
+        // Built-in sources respect enabledSources setting.
+        // Plugin sources (plex, etc.) are always included automatically.
+        const isBuiltin = BUILTIN_SOURCES.includes(k)
+        if (!isBuiltin || enabledSources.value.includes(k) || k.startsWith('camera_')) {
             reg[k] = { label: v.label, icon: v.icon }
         }
     }
