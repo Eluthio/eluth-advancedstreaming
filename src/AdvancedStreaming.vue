@@ -377,6 +377,8 @@ function updateDuration() {
 }
 
 async function goLive() {
+    initAudioContext()  // must be synchronous/first — user gesture context is lost after any await
+
     streamError.value = ''
     goingLive.value   = true
 
@@ -414,7 +416,6 @@ async function goLive() {
         compositor.start()
 
         // Build audio mix from all active sources
-        initAudioContext()
         for (const [key, stream] of Object.entries(sourceStreams)) {
             connectSourceAudio(key, stream)
         }
