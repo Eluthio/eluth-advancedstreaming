@@ -1,12 +1,12 @@
 {
   "slug": "advanced-streaming",
   "name": "Advanced Streaming",
-  "version": "1.2.9",
+  "version": "1.2.11",
   "description": "OBS-style compositor for stream channels. Layer sources, manage scenes, apply transitions.",
   "author": "Eluth",
   "entry": "index.js",
   "zones": [
     "stream-compositor"
   ],
-  "tier": "community"
+  "tier": "official"
 }

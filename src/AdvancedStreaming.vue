@@ -253,9 +253,7 @@ function initAudioContext() {
 }
 
 function connectSourceAudio(key, stream) {
-    if (!audioCtx || !stream) return
-    const tracks = stream.getAudioTracks()
-    if (!tracks.length) return
+    if (!audioCtx) return
     if (audioGains[key]?.source) return  // already connected
 
     const saved   = audioGains[key] ?? { gain: 1, muted: false }
@@ -266,8 +264,19 @@ function connectSourceAudio(key, stream) {
     analyser.fftSize = 512
     analyser.smoothingTimeConstant = 0.75
 
-    // Use only first audio track to avoid channel issues
-    const source = audioCtx.createMediaStreamSource(new MediaStream([tracks[0]]))
+    // Prefer getAudioElement() if the source exposes one — createMediaElementSource
+    // pulls decoded audio directly from the media pipeline, bypassing the known
+    // Chromium issue where captureStream() on MSE-backed video returns no audio tracks.
+    const srcDef  = window.__EluthStreamSources?.[key]
+    const audioEl = srcDef?.getAudioElement?.()
+    let source
+    if (audioEl) {
+        source = audioCtx.createMediaElementSource(audioEl)
+    } else {
+        const tracks = stream?.getAudioTracks() ?? []
+        if (!tracks.length) return
+        source = audioCtx.createMediaStreamSource(new MediaStream([tracks[0]]))
+    }
     source.connect(gainNode)
     gainNode.connect(analyser)
     gainNode.connect(audioDest)
