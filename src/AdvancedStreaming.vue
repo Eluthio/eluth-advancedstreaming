@@ -496,7 +496,7 @@ function buildSourceRegistry() {
         // Plugin sources (plex, etc.) are always included automatically.
         const isBuiltin = BUILTIN_SOURCES.includes(k)
         if (!isBuiltin || enabledSources.value.includes(k) || k.startsWith('camera_')) {
-            reg[k] = { label: v.label, icon: v.icon }
+            reg[k] = { label: v.label, icon: v.icon, ...(v.slug ? { slug: v.slug } : {}) }
         }
     }
     return reg
@@ -517,9 +517,11 @@ function broadcastState() {
                 outputWidth:  outputWidth.value,
                 outputHeight: outputHeight.value,
             },
-            pluginStates: {
-                plex: window.__EluthStreamSources?.['plex']?.getState?.() ?? null,
-            },
+            pluginStates: Object.fromEntries(
+                Object.entries(window.__EluthStreamSources ?? {})
+                    .filter(([, v]) => v.slug && v.getState)
+                    .map(([k, v]) => [k, v.getState()])
+            ),
             audioChannels:  buildAudioChannels(),
             monitorVolume:  monitorVolume.value,
             monitorMuted:   monitorMuted.value,
@@ -529,12 +531,12 @@ function broadcastState() {
     }
 }
 
-// Lightweight broadcast for frequent Plex state changes (timeupdate etc.)
-function broadcastPlexState() {
+// Lightweight broadcast for frequent plugin state changes (e.g. Plex timeupdate)
+function broadcastPluginState(key) {
     if (!bc) return
-    const state = window.__EluthStreamSources?.['plex']?.getState?.()
+    const state = window.__EluthStreamSources?.[key]?.getState?.()
     if (!state) return
-    try { bc.postMessage({ type: 'plex-state', plex: state }) } catch {}
+    try { bc.postMessage({ type: 'plugin-state', key, state }) } catch {}
 }
 
 function onBcMessage(e) {
@@ -720,7 +722,7 @@ onMounted(() => {
     bc.addEventListener('message', onBcMessage)
     window.addEventListener('beforeunload', beaconStop)
     // Wire up Plex state changes → lightweight broadcast to popup
-    window.__EluthStreamSources?.['plex']?.setStateCallback?.(broadcastPlexState)
+    window.__EluthStreamSources?.['plex']?.setStateCallback?.(() => broadcastPluginState('plex'))
 })
 
 onUnmounted(() => {
