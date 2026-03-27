@@ -428,8 +428,9 @@ async function goLive() {
             body:    JSON.stringify({ mime_type: 'video/webm;codecs=vp8,opus' }),
         })
         if (!res.ok) {
-            const err = await res.json()
-            streamError.value = err.message ?? 'Failed to start stream.'
+            let msg = 'Failed to start stream.'
+            try { const err = await res.json(); msg = err.message ?? msg } catch { /* HTML error page */ }
+            streamError.value = msg
             goingLive.value = false
             return
         }
