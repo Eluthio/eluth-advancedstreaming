@@ -288,7 +288,12 @@ function connectSourceAudio(key, stream) {
     if (audioEl) {
         try {
             source = audioCtx.createMediaElementSource(audioEl)
-            console.log(`[AS Audio] ${key}: using createMediaElementSource ✓`)
+            // createMediaElementSource captures audio AFTER the element's volume is applied.
+            // The Plex plugin sets volume=0 to prevent local feedback via captureStream;
+            // now that Web Audio owns the routing, we need volume=1 so the source node
+            // actually receives audio. Local monitoring stays muted via monitorGainNode.
+            audioEl.volume = 1
+            console.log(`[AS Audio] ${key}: using createMediaElementSource ✓ (volume restored to 1)`)
         } catch (e) {
             console.warn(`[AS Audio] ${key}: createMediaElementSource failed (${e.name}: ${e.message}) — falling back to captureStream tracks`)
         }
@@ -385,6 +390,11 @@ function stopAudio() {
     // Keep gain/mute settings but clear live nodes
     for (const d of Object.values(audioGains)) {
         delete d.gainNode; delete d.analyser; delete d.source
+    }
+    // Restore volume=0 on any audio elements we un-silenced during the stream
+    for (const key of Object.keys(window.__EluthStreamSources ?? {})) {
+        const el = window.__EluthStreamSources[key]?.getAudioElement?.()
+        if (el) el.volume = 0
     }
 }
 
