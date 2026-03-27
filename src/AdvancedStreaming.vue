@@ -190,6 +190,15 @@ async function ensureSourceActive(key) {
         if (!stream) return  // source not configured (e.g. Plex with no content selected)
         sourceStreams[key] = stream
         if (isStreaming.value) connectSourceAudio(key, stream)
+
+        // MSE-backed streams (e.g. HLS via Plex) may not expose audio tracks in
+        // captureStream() immediately.  Listen for tracks that arrive asynchronously.
+        stream.addEventListener('addtrack', (e) => {
+            if (e.track.kind === 'audio' && isStreaming.value && !audioGains[key]?.source) {
+                connectSourceAudio(key, stream)
+            }
+        })
+
         nextTick(() => attachStreamToEl(key, stream))
     } catch (e) {
         if (e?.message !== 'cancelled') console.warn('[AdvancedStreaming] Failed to get stream for', key, e)
@@ -264,15 +273,19 @@ function connectSourceAudio(key, stream) {
     analyser.fftSize = 512
     analyser.smoothingTimeConstant = 0.75
 
-    // Prefer getAudioElement() if the source exposes one — createMediaElementSource
-    // pulls decoded audio directly from the media pipeline, bypassing the known
-    // Chromium issue where captureStream() on MSE-backed video returns no audio tracks.
+    // Try createMediaElementSource first — it pulls decoded audio directly from the
+    // media pipeline and works around the Chromium issue where captureStream() on
+    // MSE-backed video returns no audio tracks.  Wrapped in try/catch because it
+    // throws a SecurityError for cross-origin media (e.g. Plex from a different host)
+    // when the browser's CORS policy is enforced; in that case we fall through to
+    // the captureStream track path.
     const srcDef  = window.__EluthStreamSources?.[key]
     const audioEl = srcDef?.getAudioElement?.()
     let source
     if (audioEl) {
-        source = audioCtx.createMediaElementSource(audioEl)
-    } else {
+        try { source = audioCtx.createMediaElementSource(audioEl) } catch { /* cross-origin */ }
+    }
+    if (!source) {
         const tracks = stream?.getAudioTracks() ?? []
         if (!tracks.length) return
         source = audioCtx.createMediaStreamSource(new MediaStream([tracks[0]]))
