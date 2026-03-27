@@ -490,14 +490,16 @@ async function goLive() {
             form.append('seq',   streamSeq)
             form.append('chunk', new Blob([e.data], { type: mimeType }), 'chunk.webm')
             streamSeq++
-            fetch(`${props.apiBase}/streams/${props.channelId}/chunk`, {
+            const res = await fetch(`${props.apiBase}/streams/${props.channelId}/chunk`, {
                 method:  'POST',
                 headers: { 'Authorization': `Bearer ${props.authToken}` },
                 body:    form,
-            }).catch(() => {})
+            }).catch(() => null)
+            // 409 means the server stream was stopped externally (force-stop) — clean up
+            if (res?.status === 409 && isStreaming.value) stopStream()
         }
 
-        mediaRecorder.start(2000)
+        mediaRecorder.start(1000)  // 1s chunks: less A/V drift accumulation than 2s
         streamTimer      = setInterval(updateDuration, 1000)
         audioLevelTimer  = setInterval(broadcastAudioLevels, 80)
         broadcastState()  // push initial audioChannels to popup
