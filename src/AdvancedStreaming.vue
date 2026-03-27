@@ -253,8 +253,13 @@ function saveAudioSettings() {
 function initAudioContext() {
     if (audioCtx) return
     audioCtx = new AudioContext()
+    console.log('[AS Audio] AudioContext created — state:', audioCtx.state)
     audioDest = audioCtx.createMediaStreamDestination()
-    audioCtx.resume().catch(() => {})  // Chrome/Electron starts AudioContext suspended
+    audioCtx.resume().then(() => {
+        console.log('[AS Audio] AudioContext resumed — state:', audioCtx.state)
+    }).catch(e => {
+        console.warn('[AS Audio] AudioContext resume FAILED:', e)
+    })
 
     monitorGainNode = audioCtx.createGain()
     monitorGainNode.gain.value = monitorMuted.value ? 0 : monitorVolume.value
@@ -262,8 +267,9 @@ function initAudioContext() {
 }
 
 function connectSourceAudio(key, stream) {
-    if (!audioCtx) return
-    if (audioGains[key]?.source) return  // already connected
+    console.log(`[AS Audio] connectSourceAudio(${key}) — audioCtx:`, audioCtx?.state ?? 'null')
+    if (!audioCtx) { console.warn(`[AS Audio] ${key}: no audioCtx, skipping`); return }
+    if (audioGains[key]?.source) { console.log(`[AS Audio] ${key}: already connected`); return }
 
     const saved   = audioGains[key] ?? { gain: 1, muted: false }
     const gainNode = audioCtx.createGain()
@@ -273,22 +279,27 @@ function connectSourceAudio(key, stream) {
     analyser.fftSize = 512
     analyser.smoothingTimeConstant = 0.75
 
-    // Try createMediaElementSource first — it pulls decoded audio directly from the
-    // media pipeline and works around the Chromium issue where captureStream() on
-    // MSE-backed video returns no audio tracks.  Wrapped in try/catch because it
-    // throws a SecurityError for cross-origin media (e.g. Plex from a different host)
-    // when the browser's CORS policy is enforced; in that case we fall through to
-    // the captureStream track path.
     const srcDef  = window.__EluthStreamSources?.[key]
     const audioEl = srcDef?.getAudioElement?.()
+    const streamTracks = stream?.getAudioTracks() ?? []
+    console.log(`[AS Audio] ${key}: audioEl=${audioEl ? 'yes' : 'no'}, captureStream audio tracks=${streamTracks.length}`)
+
     let source
     if (audioEl) {
-        try { source = audioCtx.createMediaElementSource(audioEl) } catch { /* cross-origin */ }
+        try {
+            source = audioCtx.createMediaElementSource(audioEl)
+            console.log(`[AS Audio] ${key}: using createMediaElementSource ✓`)
+        } catch (e) {
+            console.warn(`[AS Audio] ${key}: createMediaElementSource failed (${e.name}: ${e.message}) — falling back to captureStream tracks`)
+        }
     }
     if (!source) {
-        const tracks = stream?.getAudioTracks() ?? []
-        if (!tracks.length) return
-        source = audioCtx.createMediaStreamSource(new MediaStream([tracks[0]]))
+        if (!streamTracks.length) {
+            console.warn(`[AS Audio] ${key}: no audio tracks in captureStream and no audioEl — cannot connect audio`)
+            return
+        }
+        source = audioCtx.createMediaStreamSource(new MediaStream([streamTracks[0]]))
+        console.log(`[AS Audio] ${key}: using captureStream track ✓`)
     }
     source.connect(gainNode)
     gainNode.connect(analyser)
@@ -296,6 +307,7 @@ function connectSourceAudio(key, stream) {
     if (monitorGainNode) gainNode.connect(monitorGainNode)
 
     audioGains[key] = { ...saved, gainNode, analyser, source }
+    console.log(`[AS Audio] ${key}: audio graph connected ✓`)
 }
 
 function setAudioGain(key, gain) {
@@ -444,8 +456,17 @@ async function goLive() {
 
         const canvasStream = compositor.captureStream(30)
         // Add mixed audio track to the stream
-        const audioTrack = audioDest?.stream.getAudioTracks()[0]
-        if (audioTrack) canvasStream.addTrack(audioTrack)
+        const audioDestTracks = audioDest?.stream.getAudioTracks() ?? []
+        console.log(`[AS Audio] audioDest tracks: ${audioDestTracks.length}, audioCtx state: ${audioCtx?.state}`)
+        console.log(`[AS Audio] canvasStream tracks before addTrack: ${canvasStream.getTracks().map(t => t.kind).join(', ')}`)
+        const audioTrack = audioDestTracks[0]
+        if (audioTrack) {
+            canvasStream.addTrack(audioTrack)
+            console.log(`[AS Audio] audio track added to canvasStream ✓`)
+        } else {
+            console.warn(`[AS Audio] no audio track from audioDest — stream will be video-only`)
+        }
+        console.log(`[AS Audio] canvasStream final tracks: ${canvasStream.getTracks().map(t => t.kind).join(', ')}`)
 
         const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
             ? 'video/webm;codecs=vp8,opus'
