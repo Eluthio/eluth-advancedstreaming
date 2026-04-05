@@ -1,7 +1,7 @@
 {
   "slug": "advanced-streaming",
   "name": "Advanced Streaming",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "OBS-style compositor for stream channels. Layer sources, manage scenes, apply transitions.",
   "author": "Eluth",
   "entry": "index.js",
@@ -12,6 +12,7 @@
     {
       "param": "popup",
       "value": "stream-control",
+      "component": "StreamControlPanel",
       "title": "Streaming Controls",
       "accepts_controls": true
     }
